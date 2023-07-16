@@ -14,8 +14,92 @@ interface Task {
   label: string;
 }
 
+const useCompleteTask = () => {
+  const { mutate: completeTask } = useTaskMutation({
+    mutationFn: async (id: number) => {
+      const response = await fetch(
+        `http://localhost:4000/tasks/${id}/complete`
+      );
+      return await response.json();
+    },
+    getOptimisticUpdateData: (id) => (tasks) =>
+      tasks?.filter((_) => _.id !== id)
+  });
+  return { completeTask };
+};
+
+const useCreateTask = () => {
+  const { mutate: createTask } = useTaskMutation<void>({
+    mutationFn: async () => {
+      const response = await fetch(`http://localhost:4000/tasks/create/`, {
+        method: "POST"
+      });
+      return await response.json();
+    },
+    getOptimisticUpdateData: () => (tasks) =>
+      [...(tasks ?? []), { placeholder: true } as unknown as Task]
+  });
+  return { createTask };
+};
+
+const useTaskMutation = <T extends unknown>({
+  mutationFn,
+  getOptimisticUpdateData
+}: {
+  mutationFn: (t: T) => Promise<Task[]>;
+  getOptimisticUpdateData: (
+    t: T
+  ) => (tasks: Task[] | undefined) => Task[] | undefined;
+}) => {
+  const queryClient = useQueryClient();
+
+  return useMutation<Task[], unknown, T, { previousTasks: Task[] }>({
+    mutationKey: ["tasks", "mutation"],
+    mutationFn,
+    onMutate: async (args: T) => {
+      // Cancel any outgoing refetches
+      // (so they don't overwrite our optimistic update)
+      await queryClient.cancelQueries({ queryKey: ["tasks"] });
+
+      // Snapshot the previous value
+      const previousTasks = queryClient.getQueryData(["tasks"]) as Task[];
+
+      // Optimistically update to the new value
+      queryClient.setQueryData<Task[]>(
+        ["tasks"],
+        getOptimisticUpdateData(args)
+      );
+
+      // Return a context object with the snapshotted value
+      return { previousTasks };
+    },
+    // If the mutation fails,
+    // use the context returned from onMutate to roll back
+    onError: (_err, _id, context) => {
+      queryClient.setQueryData(["tasks"], context?.previousTasks);
+      queryClient.invalidateQueries(["tasks"]);
+    },
+    onSuccess: (data: Task[]) => {
+      console.log(
+        'queryClient.isMutating({ mutationKey: ["tasks"] })',
+        queryClient.isMutating({ mutationKey: ["tasks"] })
+      );
+      const hasOtherMutations =
+        queryClient.isMutating({ mutationKey: ["tasks"] }) > 1;
+      if (!hasOtherMutations) {
+        queryClient.setQueryData(["tasks"], data);
+      }
+    }
+  });
+};
+
 function App() {
   const [isOnline, setIsOnline] = useState(onlineManager.isOnline());
+
+  const queryClient = useQueryClient();
+  const mutates = useIsMutating();
+  const fetches = useIsFetching();
+
   useEffect(() => {
     return onlineManager.subscribe(() => {
       setIsOnline(onlineManager.isOnline());
@@ -30,50 +114,21 @@ function App() {
         signal
       });
       return response.json();
-    }
+    },
+    enabled: !!mutates
   });
 
-  const queryClient = useQueryClient();
-  const mutates = useIsMutating();
-  const fetches = useIsFetching();
+  const { completeTask } = useCompleteTask();
 
-  const { mutateAsync: completeTask } = useMutation({
-    mutationFn: (id: number) => {
-      return fetch(`http://localhost:4000/tasks/${id}/complete`);
-    },
-    onMutate: () => {
-      queryClient.cancelQueries(["tasks"]);
-    },
-    onSuccess: () => {
-      console.log("onsucces");
-      queryClient.cancelQueries(["tasks"]);
-      queryClient.invalidateQueries(["tasks"]);
-    }
-  });
-
-  const { mutate: createTask } = useMutation({
-    mutationFn: () => {
-      console.log("creating!");
-      return fetch(`http://localhost:4000/tasks/create/`, { method: "POST" });
-    },
-    onMutate: () => {
-      // queryClient.cancelQueries(["tasks"]);
-    },
-    onSuccess: () => {
-      console.log("onsucces");
-      // queryClient.cancelQueries(["tasks"]);
-      // queryClient.invalidateQueries(["tasks"]);
-    }
-  });
+  const { createTask } = useCreateTask();
 
   const showSpinner = mutates + fetches > 0 && isOnline;
 
   return (
     <div className="m-10 p-10 max-w-xl bg-cyan-100 flex flex-col">
       <div className="font-mono mb-8 self-end text-sm flex">
-        {isOnline
-          ? "online"
-          : `offline${mutates ? ` (${mutates} pending)` : ""}`}
+        {isOnline ? "online" : "offline"}
+        {mutates ? ` (${mutates} pending)` : ""}
         <CircularProgress
           className="align-middle -mr-6 ml-2"
           size={"1.2em"}
@@ -94,17 +149,23 @@ function App() {
       ) : data ? (
         data.length ? (
           <ul className="flex flex-col">
-            {data.map((task) => (
-              <li className="mb-2 flex" key={task.id}>
-                <span className="grow">{task.label}</span>
-                <button
-                  className="text-cyan-600 place-self-end"
-                  onClick={() => completeTask(task.id)}
-                >
-                  Complete
-                </button>
-              </li>
-            ))}
+            {data.map((task, i) =>
+              (task as unknown as { placeholder: true }).placeholder ? (
+                <li className="mb-2 flex" key={-i}>
+                  <i>Task being created...</i>
+                </li>
+              ) : (
+                <li className="mb-2 flex" key={task.id}>
+                  <span className="grow">{task.label}</span>
+                  <button
+                    className="text-cyan-600 place-self-end"
+                    onClick={() => completeTask(task.id)}
+                  >
+                    Complete
+                  </button>
+                </li>
+              )
+            )}
           </ul>
         ) : (
           <div>No tasks left!</div>

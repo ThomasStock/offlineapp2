@@ -7,7 +7,7 @@ const port = 4000;
 app.use(cors({ origin: "*" }));
 
 app.use((req, res, next) => {
-  res.set("Cache-Control", "no-cache, no-transform");
+  // res.set("Cache-Control", "no-cache, no-transform");
   next();
 });
 
@@ -46,7 +46,9 @@ app.get("/tasks/:id/complete", (req, res) => {
   const id = req.params.id;
   tasks = tasks.filter((_) => _.id.toString() != id);
   console.log(tasks);
-  res.json(tasks);
+  setTimeout(() => {
+    res.json(tasks);
+  }, 1000);
 });
 
 app.post("/tasks/create", (req, res) => {
