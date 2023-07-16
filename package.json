@@ -1,0 +1,16 @@
+{
+  "name": "offlineapp",
+  "version": "1.0.0",
+  "description": "",
+  "scripts": {
+    "dev": "concurrently \"npm run app:dev\" \"npm run serve\"",
+    "app:dev": "cd ./app && npm run dev",
+    "serve": "cd ./server && npm run serve"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "concurrently": "^8.2.0",
+    "typescript": "^5.1.6"
+  }
+}
